@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.ColumnConstraints?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.RowConstraints?>
+
+<GridPane hgap="10.0" vgap="10.0" xmlns="http://javafx.com/javafx/8.0.141" xmlns:fx="http://javafx.com/fxml/1" fx:controller="somodel.analysis.SettingViewController">
+	<rowConstraints>
+		<RowConstraints minHeight="10.0" prefHeight="30.0" />
+		<RowConstraints minHeight="10.0" prefHeight="30.0" />
+      <RowConstraints minHeight="10.0" prefHeight="30.0" />
+	</rowConstraints>
+	<columnConstraints>
+		<ColumnConstraints minWidth="10.0" prefWidth="300.0" />
+		<ColumnConstraints hgrow="SOMETIMES" minWidth="10.0" prefWidth="200.0" />
+	</columnConstraints>
+	<padding>
+		<Insets bottom="20.0" left="20.0" right="20.0" top="20.0" />
+	</padding>
+	<children>
+		<TextField fx:id="pythonPathField" prefHeight="200.0" prefWidth="200.0" promptText="Enter the path to Python executable" />
+		<Button fx:id="locatePythonButton" maxWidth="1.7976931348623157E308" mnemonicParsing="false" text="Locate Python" GridPane.columnIndex="1" />
+		<TextField fx:id="pyTreeMakerField" promptText="Enter Python tree maker script" GridPane.rowIndex="1" />
+		<Button fx:id="locatePyTreeMakerButton" maxWidth="1.7976931348623157E308" mnemonicParsing="false" text="Locate Python Tree Maker (make_one_doc_tree_picture.py)" GridPane.columnIndex="1" GridPane.rowIndex="1" />
+      <Button fx:id="okSettingButton" mnemonicParsing="false" prefWidth="100.0" text="OK" GridPane.columnIndex="1" GridPane.halignment="RIGHT" GridPane.rowIndex="2" />
+      <Label fx:id="settingStatusLabel" GridPane.halignment="RIGHT" GridPane.rowIndex="2" />
+	</children>
+</GridPane>
