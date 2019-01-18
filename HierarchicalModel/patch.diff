@@ -1,0 +1,359 @@
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..412f6a6
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,5 @@
++.classpath
++.project
++bin
++build
++dist
+diff --git a/VERSION.md b/VERSION.md
+new file mode 100644
+index 0000000..4beeee8
+--- /dev/null
++++ b/VERSION.md
+@@ -0,0 +1,3 @@
++source:
++revision 27f5127f3a3055c8eda64d9cf2547172fa67170d 
++of https://github.com/vietansegan/segan
+diff --git a/script/run.cmd b/script/run.cmd
+new file mode 100644
+index 0000000..b50aa3f
+--- /dev/null
++++ b/script/run.cmd
+@@ -0,0 +1,20 @@
++java -Xmx15g ^
++        -XX:-UseGCOverheadLimit ^
++        -cp "./segan.jar" ^
++        sampler.labeled.hierarchy.L2H ^
++        -v ^
++        --dataset so2016 ^
++        --output so2016_out ^
++        --format-file so2016 ^
++        --numTopwords 20 ^
++        --min-label-freq 900 ^
++        --burnIn 250 ^
++        --maxIter 500 ^
++        --sampleLag 25 ^
++        --report 1 ^
++        --alpha 10 ^
++        --beta 1000 ^
++        --a0 90 ^
++        --b0 10 ^
++        --format-folder so2016 ^
++        --path max
+\ No newline at end of file
+diff --git a/src/data/TextDataset.java b/src/data/TextDataset.java
+index aba5765..071237c 100644
+--- a/src/data/TextDataset.java
++++ b/src/data/TextDataset.java
+@@ -124,6 +124,7 @@ public class TextDataset extends AbstractTokenizeDataset {
+     }
+ 
+     public void prepareTopicCoherence(int numTopWords) {
++        logln("words.length: " + words.length + " wordVocab.size(): " + wordVocab.size());
+         this.topicCoherence = new MimnoTopicCoherence(words, wordVocab.size(), numTopWords);
+         this.topicCoherence.prepare();
+     }
+diff --git a/src/sampler/labeled/LabeledLDA.java b/src/sampler/labeled/LabeledLDA.java
+index 8ab4e8d..523fcd8 100644
+--- a/src/sampler/labeled/LabeledLDA.java
++++ b/src/sampler/labeled/LabeledLDA.java
+@@ -9,6 +9,7 @@ import java.io.IOException;
+ import java.io.Serializable;
+ import java.util.ArrayList;
+ import org.apache.commons.cli.BasicParser;
++import org.apache.commons.cli.OptionBuilder;
+ import org.apache.commons.cli.Options;
+ import sampling.likelihood.DirMult;
+ import sampling.util.SparseCount;
+@@ -73,9 +74,10 @@ import util.evaluation.MimnoTopicCoherence;
+                 sampler.BURN_IN,
+                 sampler.MAX_ITER,
+                 sampler.LAG,
+-                sampler.REP_INTERVAL);
++                sampler.REP_INTERVAL,
++                sampler.report);
+     }
+-
++    
+     public void configure(String folder,
+             int V, int L,
+             double alpha,
+@@ -83,6 +85,22 @@ import util.evaluation.MimnoTopicCoherence;
+             InitialState initState,
+             boolean paramOpt,
+             int burnin, int maxiter, int samplelag, int repInterval) {
++        configure(folder,
++                V, L,
++                alpha,
++                beta,
++                initState,
++                paramOpt,
++                burnin, maxiter, samplelag, repInterval, false);
++    }
++
++    public void configure(String folder,
++            int V, int L,
++            double alpha,
++            double beta,
++            InitialState initState,
++            boolean paramOpt,
++            int burnin, int maxiter, int samplelag, int repInterval, boolean reportState) {
+         if (verbose) {
+             logln("Configuring ...");
+         }
+@@ -107,6 +125,7 @@ import util.evaluation.MimnoTopicCoherence;
+         this.paramOptimized = paramOpt;
+         this.prefix += initState.toString();
+         this.setName();
++        this.report = reportState;
+ 
+         if (verbose) {
+             logln("--- folder\t" + folder);
+@@ -119,6 +138,7 @@ import util.evaluation.MimnoTopicCoherence;
+             logln("--- sample lag:\t" + LAG);
+             logln("--- paramopt:\t" + paramOptimized);
+             logln("--- initialize:\t" + initState);
++            logln("--- report model state:\t" + report);
+         }
+     }
+ 
+@@ -326,6 +346,7 @@ import util.evaluation.MimnoTopicCoherence;
+         }
+ 
+         if (report) {
++            // outputState(new File(reportFolderPath, getIteratedStateFile()), true, false);
+             outputState(new File(reportFolderPath, getIteratedStateFile()), true, false);
+             outputTopicTopWords(new File(reportFolderPath, getIteratedTopicFile()), 20);
+         }
+@@ -497,6 +518,20 @@ import util.evaluation.MimnoTopicCoherence;
+                     + total + " vs. " + numTokens);
+         }
+     }
++    
++    private void outputLabelVocab(File filepath) {
++        try {
++            BufferedWriter writer = IOUtils.getBufferedWriter(filepath);
++            for (String element : labelVocab) {
++                writer.write(element + "\n");
++            }
++            writer.close();
++        } catch (IOException e) {
++            e.printStackTrace();
++            throw new RuntimeException("Exception while outputing label vocab to "
++                    + filepath);
++        }
++    }
+ 
+     /**
+      * Output current state including the learned model and the current
+@@ -1415,6 +1450,10 @@ import util.evaluation.MimnoTopicCoherence;
+             options.addOption("v", false, "verbose");
+             options.addOption("d", false, "debug");
+             options.addOption("help", false, "Help");
++            options.addOption(OptionBuilder.withLongOpt("report-state")
++                    .withDescription("Report model state during iteration")
++                    .hasArg(false)
++                    .create());
+ 
+             cmd = parser.parse(options, args);
+             if (cmd.hasOption("help")) {
+@@ -1451,8 +1490,9 @@ import util.evaluation.MimnoTopicCoherence;
+         double alpha = CLIUtils.getDoubleArgument(cmd, "alpha", 0.1);
+         double beta = CLIUtils.getDoubleArgument(cmd, "beta", 0.1);
+ 
+-        boolean verbose = true;
+-        boolean debug = true;
++        boolean verbose = cmd.hasOption("v");
++        boolean debug = cmd.hasOption("d");
++        boolean reportState = cmd.hasOption("report-state");
+ 
+         if (verbose) {
+             System.out.println("\nLoading formatted data ...");
+@@ -1471,6 +1511,8 @@ import util.evaluation.MimnoTopicCoherence;
+         if (verbose) {
+             System.out.println("\tRunning Labeled-LDA sampler ...");
+         }
++
++        
+         LabeledLDA sampler = new LabeledLDA();
+         sampler.setVerbose(verbose);
+         sampler.setDebug(debug);
+@@ -1479,7 +1521,13 @@ import util.evaluation.MimnoTopicCoherence;
+ 
+         sampler.configure(outputFolder,
+                 V, K, alpha, beta, initState, paramOpt,
+-                burnIn, maxIters, sampleLag, repInterval);
++                burnIn, maxIters, sampleLag, repInterval, reportState);
++        
++        File builderFolder = new File(outputFolder, "filtered");
++        IOUtils.createFolder(builderFolder);
++        File labelVocFile = new File(builderFolder, "labels.voc");
++        sampler.outputLabelVocab(labelVocFile);
++        
+         sampler.train(null, data.getWords(), data.getLabels());
+         File lldaFolder = new File(outputFolder, sampler.getSamplerFolder());
+         IOUtils.createFolder(lldaFolder);
+diff --git a/src/sampler/labeled/hierarchy/L2H.java b/src/sampler/labeled/hierarchy/L2H.java
+index 5e3e333..8bc3593 100644
+--- a/src/sampler/labeled/hierarchy/L2H.java
++++ b/src/sampler/labeled/hierarchy/L2H.java
+@@ -55,6 +55,10 @@ public class L2H extends AbstractSampler {
+     protected int[][] labels; // [D] x [T_d] 
+     protected int V;    // vocab size
+     protected int L;    // number of unique labels
++    public int getL() {
++        return L;
++    }
++
+     protected int D;    // number of documents
+     // graph
+     private SparseVector[] inWeights; // the weights of in-edges for each nodes
+@@ -202,6 +206,10 @@ public class L2H extends AbstractSampler {
+         str.append("-").append(sampleExact);
+         this.name = str.toString();
+     }
++    
++    public Node[] getNodes() {
++    	return nodes;
++    }
+ 
+     /**
+      * Set training data.
+@@ -1007,15 +1015,20 @@ public class L2H extends AbstractSampler {
+      * assigned to a node in the candidate set or not.
+      */
+     private int proposeZ(int d, int n, int pX) {
+-        ArrayList<Integer> indices = new ArrayList<Integer>();
+-        ArrayList<Double> logprobs = new ArrayList<Double>();
++//        ArrayList<Integer> indices = new ArrayList<Integer>();
++//        ArrayList<Double> logprobs = new ArrayList<Double>();
++        Double[] logProbsArray = new Double[L];
++        Integer[] indexArray = new Integer[L];
++        int idx = 0;
+         if (pX == INSIDE) {
+             for (int ll : docMaskes[d]) {
+                 double zLlh = Math.log((docLabelCounts[d].getCount(ll) + hyperparams.get(ALPHA))
+                         / (docSwitches[d].getCount(INSIDE) + hyperparams.get(ALPHA) * docMaskes[d].size()));
+                 double wLlh = Math.log(nodes[ll].topic[words[d][n]]);
+-                logprobs.add(zLlh + wLlh);
+-                indices.add(ll);
++                // logprobs.add(zLlh + wLlh);
++                // indices.add(ll);
++                logProbsArray[idx] = zLlh + wLlh;
++                indexArray[idx ++] = ll;
+             }
+         } else {
+             for (int ll = 0; ll < L; ll++) {
+@@ -1025,10 +1038,14 @@ public class L2H extends AbstractSampler {
+                 double zLlh = Math.log((docLabelCounts[d].getCount(ll) + hyperparams.get(ALPHA))
+                         / (docSwitches[d].getCount(INSIDE) + hyperparams.get(ALPHA) * (L - docMaskes[d].size())));
+                 double wLlh = Math.log(nodes[ll].topic[words[d][n]]);
+-                logprobs.add(zLlh + wLlh);
+-                indices.add(ll);
++                // logprobs.add(zLlh + wLlh);
++                // indices.add(ll);
++                logProbsArray[idx] = zLlh + wLlh;
++                indexArray[idx ++] = ll;
+             }
+         }
++        ArrayList<Double> logprobs = new ArrayList<Double>(Arrays.asList(Arrays.copyOfRange(logProbsArray, 0, idx)));
++        ArrayList<Integer> indices = new ArrayList<Integer>(Arrays.asList(Arrays.copyOfRange(indexArray, 0, idx)));
+         int sampledIdx = SamplerUtils.logMaxRescaleSample(logprobs);
+         return indices.get(sampledIdx);
+     }
+@@ -1697,6 +1714,9 @@ public class L2H extends AbstractSampler {
+             this.docLabelCounts[d] = new SparseCount();
+             this.docMaskes[d] = new HashSet<Integer>();
+ 
++            // Hui Chen: Set<Integer> cands = getCandidates(initPredictions[d], topK); -> 2 statements
++            // int actualK = topK <= initPredictions[d].length ? topK : initPredictions[d].length;
++            // Set<Integer> cands = getCandidates(initPredictions[d], actualK);
+             Set<Integer> cands = getCandidates(initPredictions[d], topK);
+             for (int label : cands) {
+                 Node node = nodes[label];
+@@ -1755,6 +1775,7 @@ public class L2H extends AbstractSampler {
+     private Set<Integer> getCandidates(double[] scores, int topK) {
+         Set<Integer> cands = new HashSet<Integer>();
+         ArrayList<RankingItem<Integer>> docRankLabels = MiscUtils.getRankingList(scores);
++        System.out.println("scores.length: " + scores.length + " docRankLabels: " + docRankLabels.size());
+         for (int ii = 0; ii < topK; ii++) {
+             cands.add(docRankLabels.get(ii).getObject());
+         }
+@@ -1762,14 +1783,14 @@ public class L2H extends AbstractSampler {
+     }
+     // ******************* End prediction **************************************
+ 
+-    class Node extends TreeNode<Node, SparseCount> {
++    public class Node extends TreeNode<Node, SparseCount> {
+ 
+         final int id;
+         double[] topic;
+         SparseCount pseudoCounts;
+         HashMap<Integer, ArrayList<Integer>> assignedTokens;
+ 
+-        Node(int id, int index, int level,
++        protected Node(int id, int index, int level,
+                 SparseCount content,
+                 Node parent) {
+             super(index, level, content, parent);
+@@ -1777,6 +1798,10 @@ public class L2H extends AbstractSampler {
+             this.pseudoCounts = new SparseCount();
+             this.assignedTokens = new HashMap<Integer, ArrayList<Integer>>();
+         }
++        
++        public int getId() {
++        	return id;
++        }
+ 
+         public Set<Integer> getSubtree() {
+             Set<Integer> subtree = new HashSet<Integer>();
+@@ -2031,7 +2056,7 @@ public class L2H extends AbstractSampler {
+         int minLabelFreq = CLIUtils.getIntegerArgument(cmd, "min-label-freq", 100);
+ 
+         int burnIn = CLIUtils.getIntegerArgument(cmd, "burnIn", 250);
+-        int maxIters = CLIUtils.getIntegerArgument(cmd, "maxIter", 500);
++        int maxIters = CLIUtils.getIntegerArgument(cmd, "maxIter", 2);
+         int sampleLag = CLIUtils.getIntegerArgument(cmd, "sampleLag", 25);
+         int repInterval = CLIUtils.getIntegerArgument(cmd, "report", 1);
+ 
+@@ -2063,6 +2088,24 @@ public class L2H extends AbstractSampler {
+         boolean debug = cmd.hasOption("d");
+ 
+         if (verbose) {
++            //
++            System.out.println("--- folder\t" + outputFolder);
++            //System.out.println("--- label vocab:\t" + L); // knew it after loading data
++            // System.out.println("--- word vocab:\t" + V);
++            System.out.println("--- alpha:\t" + MiscUtils.formatDouble(alpha));
++            System.out.println("--- beta:\t" + MiscUtils.formatDouble(beta));
++            System.out.println("--- a0:\t" + MiscUtils.formatDouble(a0));
++            System.out.println("--- b0:\t" + MiscUtils.formatDouble(b0));
++            System.out.println("--- burn-in:\t" + burnIn);
++            System.out.println("--- max iter:\t" + maxIters);
++            System.out.println("--- sample lag:\t" + sampleLag);
++            //System.out.println("--- paramopt:\t" + paramOptimized);
++            //System.out.println("--- initialize:\t" + initState);
++            System.out.println("--- path assumption:\t" + pathAssumption);
++            //System.out.println("--- tree builder:\t" + treeBuilder.getName());
++            //System.out.println("--- updating tree?\t" + treeUpdated);
++            System.out.println("--- exact sampling?\t" + sampleExact);
++            //
+             System.out.println("\nLoading formatted data ...");
+         }
+         LabelTextDataset data = new LabelTextDataset(datasetName);
+diff --git a/src/util/evaluation/MimnoTopicCoherence.java b/src/util/evaluation/MimnoTopicCoherence.java
+index 514da9a..0000696 100644
+--- a/src/util/evaluation/MimnoTopicCoherence.java
++++ b/src/util/evaluation/MimnoTopicCoherence.java
+@@ -37,6 +37,7 @@ public class MimnoTopicCoherence {
+ 
+             for (int token : uniqueTokens) {
+                 for (int otherToken : uniqueTokens) {
++                    // System.out.println("token: " + token + " otherToken: " + otherToken);
+                     coDocFreq[token][otherToken]++;
+                 }
+             }
