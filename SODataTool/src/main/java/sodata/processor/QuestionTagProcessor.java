@@ -117,9 +117,11 @@ public class QuestionTagProcessor {
         
         if (processor.buildTagTables()) {
             LOGGER.info("Build tags tables.");
+            System.exit(0);
         } else {
             LOGGER.error("Failed to build tags tables.");
+            System.exit(1);
         }
-                
+
     }
 }

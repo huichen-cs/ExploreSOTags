@@ -258,6 +258,40 @@ public class L2hDataMakerBase {
         
         return true;
     }
+    
+    public static boolean makeFilteredL2HDatasetFiles(String datasetName, 
+            String datasetFolder, String tablePrefix, String tableSuffix, String dbPropertiesFilename) {
+
+        LOGGER.info("Making word-vocabulary file (.wvoc file) ...");
+        if (!makeWordVocabularyFile(datasetFolder, datasetName, tablePrefix, tableSuffix, dbPropertiesFilename)) {
+            LOGGER.error("Failed to make word vocabulary file.");
+            return false;
+        }
+        LOGGER.info("Created word-vocabulary file.");
+        
+        LOGGER.info("Making question-word-frequency file (.dat file) ...");
+        if (!makeFilteredQuestionWordFreqFile(datasetFolder, datasetName, tablePrefix, tableSuffix, dbPropertiesFilename)) {
+            LOGGER.error("Failed to make doc-word-frequency file.");
+            return false;
+        }
+        LOGGER.info("Created question-word-frequency file (.dat file).");
+        
+        LOGGER.info("Making tag-vocabulary file (.lvoc file) ...");
+        if (!makeTagVocabularyFile(datasetFolder, datasetName, tablePrefix, tableSuffix, dbPropertiesFilename)) {
+            LOGGER.error("Failed to make tag vocabulary file.");
+            return false;        
+        }
+        LOGGER.info("Created tag-vocabulary file.");
+        
+        LOGGER.info("Making question-tab file (.docinfo file) ...");
+        if (!makeFilteredQuestionTagFile(datasetFolder, datasetName, tablePrefix, tableSuffix, dbPropertiesFilename)) {
+            LOGGER.error("Failed to make doc-tag file.");
+            return false;
+        }
+        LOGGER.info("Created question-tab file (.docinfo file).");
+        
+        return true;
+    }
 
     private static boolean makeWordVocabularyFile(String datasetFolder, 
             String datasetName, String tablePrefix, String tableSuffix, String dbPropertiesFilename) {
@@ -295,6 +329,7 @@ public class L2hDataMakerBase {
         LOGGER.info("To execute query: " + sql + ".");
         try (Connection conn = DbUtils.connect(dbPropertiesFilename)) {
             // query can be big, using fetch size
+            int docCounter = 0;
             conn.setAutoCommit(false);
             try (PreparedStatement pstmt = conn.prepareStatement(sql, ResultSet.TYPE_FORWARD_ONLY,
                     ResultSet.CONCUR_READ_ONLY, ResultSet.CLOSE_CURSORS_AT_COMMIT)) {
@@ -318,6 +353,7 @@ public class L2hDataMakerBase {
                                 writer.print(wordFreq.wordId + ":" + wordFreq.frequency + " ");
                             }
                             writer.println();
+                            docCounter ++;
                             qWordFreqList.clear();
                             qWordFreqList.add(new WordFrequency(wordId, wordCount));
                         } else {
@@ -336,6 +372,7 @@ public class L2hDataMakerBase {
                     writer.println();
                     qWordFreqList.clear();                   
                     LOGGER.info("Completed processing " + workCounter + " post-word counts.");
+                    LOGGER.info("Processed " + docCounter + " documents.");
                     LOGGER.info("Wrote data file to " + datFilePath.toString());
                 }
             }
@@ -345,6 +382,75 @@ public class L2hDataMakerBase {
             return false;
         }
     }
+    
+    private static boolean makeFilteredQuestionWordFreqFile(String datasetFolder, String datasetName, String tablePrefix,
+            String tableSuffix, String dbPropertiesFilename) {
+        Path datFilePath = getQuestionWordFreqFilePath(datasetFolder, datasetName);
+        File datFile = new File(datFilePath.toString());
+        LOGGER.info("L2H vocabulary will be written to " + datFile.getAbsolutePath());
+
+        String sql = "SELECT w.postid, w.newwordid, w.wordcount FROM " 
+            + L2hDbUtils.getL2hQuestionWordTable(tablePrefix, tableSuffix) + " AS w, "
+            + L2hDbUtils.getL2hQuestionTagTable(tablePrefix, tableSuffix) + " As t "
+            + " WHERE w.postid=t.postid"
+            + " ORDER BY w.postid, w.newwordid";
+        LOGGER.info("To execute query: " + sql + ".");
+        try (Connection conn = DbUtils.connect(dbPropertiesFilename)) {
+            // query can be big, using fetch size
+            int docCounter = 0;
+            conn.setAutoCommit(false);
+            try (PreparedStatement pstmt = conn.prepareStatement(sql, ResultSet.TYPE_FORWARD_ONLY,
+                    ResultSet.CONCUR_READ_ONLY, ResultSet.CLOSE_CURSORS_AT_COMMIT)) {
+                pstmt.setFetchSize(FilterDbUtils.FETCH_BATCH_SIZE);
+                try (ResultSet rs = pstmt.executeQuery(); 
+                        PrintWriter writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(datFile), StandardCharsets.UTF_8))) {
+                    LOGGER.info("Processing query result from query: " + sql + ".");
+                    long prevPostId = -1;;
+                    long workCounter = 0l;
+                    List<WordFrequency> qWordFreqList = new LinkedList<WordFrequency>();
+                    while (rs.next()) {
+                        long postId = rs.getLong(1);
+                        long wordId = rs.getLong(2);
+                        long wordCount = rs.getLong(3);
+
+                        if (prevPostId >= 0 && prevPostId != postId) { // new
+                                                                       // doc
+                                                                       // begin
+                            writer.print(qWordFreqList.size() + " ");
+                            for(WordFrequency wordFreq:qWordFreqList) {
+                                writer.print(wordFreq.wordId + ":" + wordFreq.frequency + " ");
+                            }
+                            writer.println();
+                            docCounter ++;
+                            qWordFreqList.clear();
+                            qWordFreqList.add(new WordFrequency(wordId, wordCount));
+                        } else {
+                            qWordFreqList.add(new WordFrequency(wordId, wordCount));
+                        }
+                        prevPostId = postId;
+                        workCounter ++;
+                        if (workCounter % FilterDbUtils.LOG_WORK_COUNTER == 0) {
+                            LOGGER.info("Processed " + workCounter + " post-word counts.");
+                        }
+                    }
+                    writer.print(qWordFreqList.size() + " ");
+                    for(WordFrequency wordFreq:qWordFreqList) {
+                        writer.print(wordFreq.wordId + ":" + wordFreq.frequency + " ");
+                    }
+                    writer.println();
+                    qWordFreqList.clear();                   
+                    LOGGER.info("Completed processing " + workCounter + " post-word counts.");
+                    LOGGER.info("Processed " + docCounter + " documents.");
+                    LOGGER.info("Wrote data file to " + datFilePath.toString());
+                }
+            }
+            return true;
+        } catch (SQLException | FileNotFoundException e) {
+            LOGGER.error("failed to process data.", e);
+            return false;
+        }
+    }
+
     
     private static boolean makeTagVocabularyFile(String datasetFolder, String datasetName, 
             String tablePrefix, String tableSuffix,
@@ -383,6 +489,46 @@ public class L2hDataMakerBase {
         LOGGER.info("L2H doc-tag file will be written to " + docTagFile.getAbsolutePath());
         
         String sql = "SELECT postid,newtagid FROM " + L2hDbUtils.getL2hQuestionTagTable(tablePrefix, tableSuffix) + " ORDER BY postid,newtagid";
+        LOGGER.info("To execute query: " + sql + ".");
+        try (Connection conn = DbUtils.connect(dbPropertiesFilename);
+                PreparedStatement pstmt = conn.prepareStatement(sql);
+                ResultSet rs = pstmt.executeQuery();
+                PrintWriter writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(docTagFile), StandardCharsets.UTF_8))) {
+            LOGGER.info("Processing query result from query: " + sql + ".");
+            long prevPostId = -1;
+            while (rs.next()) {
+                long postId = rs.getLong(1);
+                long tagId = rs.getLong(2);
+                
+                if (prevPostId != postId) { // new doc begin
+                    if (prevPostId >= 0) writer.println();
+                    writer.print(Long.toString(postId) + "\t" + Long.toString(tagId));
+                } else {
+                    writer.print("\t" + Long.toString(tagId));
+                }
+                prevPostId = postId;
+            }          
+            LOGGER.info("Wrote doc-tag file to " + docTagFilePath.toString());
+            return true;
+        } catch (SQLException | FileNotFoundException e) {
+            LOGGER.error("failed to process data.", e);
+            return false;
+        }  
+    }
+    
+
+    private static boolean makeFilteredQuestionTagFile(String datasetFolder, String datasetName, 
+            String tablePrefix, String tableSuffix,
+            String dbPropertiesFilename) {
+        Path docTagFilePath = getQuestionTagFilePath(datasetFolder, datasetName);
+        File docTagFile = new File(docTagFilePath.toString());
+        LOGGER.info("L2H doc-tag file will be written to " + docTagFile.getAbsolutePath());
+        
+        String sql = "SELECT t.postid,t.newtagid FROM " 
+                + L2hDbUtils.getL2hQuestionTagTable(tablePrefix, tableSuffix) + " AS t, "
+                + L2hDbUtils.getL2hQuestionWordTable(tablePrefix, tableSuffix) + " As w "
+                + " WHERE t.postid=w.postid "
+                + " ORDER BY postid,newtagid";
         LOGGER.info("To execute query: " + sql + ".");
         try (Connection conn = DbUtils.connect(dbPropertiesFilename);
                 PreparedStatement pstmt = conn.prepareStatement(sql);

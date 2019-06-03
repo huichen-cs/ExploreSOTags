@@ -124,10 +124,10 @@ public class L2hDataMaker extends L2hDataMakerBase {
         LOGGER.info("Created dataset folder: " + datasetFolder);
         
         LOGGER.info("Making L2H dataset from database described in " + dbPropertiesFilename + "...");
-        if (makeL2HDatasetFiles(datasetName, datasetFolder, tablePrefix, tableSuffix, dbPropertiesFilename)) {
+        if (makeFilteredL2HDatasetFiles(datasetName, datasetFolder, tablePrefix, tableSuffix, dbPropertiesFilename)) {
             LOGGER.info("successfully prepared L2H dataset.");
         } else {
-            LOGGER.error("successfully prepared L2H dataset.");
+            LOGGER.error("Failed prepared L2H dataset.");
         }
     }
 }
